@@ -18,6 +18,7 @@ use move_binary_format::{
 };
 use rand::{distributions::Alphanumeric, prelude::StdRng, seq::SliceRandom, Rng};
 use rand_core::RngCore;
+use std::collections::HashMap;
 
 //
 // Contains all the code to work on the Simple package
@@ -27,13 +28,15 @@ use rand_core::RngCore;
 // Functions to load and update the original package
 //
 
-pub fn load_package() -> (Vec<CompiledModule>, PackageMetadata) {
-    let metadata = bcs::from_bytes::<PackageMetadata>(&raw_module_data::PACKAGE_METADATA_SIMPLE)
+pub fn load_package() -> (HashMap<String, CompiledModule>, PackageMetadata) {
+    let metadata = bcs::from_bytes::<PackageMetadata>(&raw_module_data::PACKAGE_METADATA)
         .expect("PackageMetadata for GenericModule must deserialize");
-    let mut modules = vec![];
-    let module = CompiledModule::deserialize(&raw_module_data::MODULE_SIMPLE)
-        .expect("Simple.move must deserialize");
-    modules.push(module);
+    let mut modules = HashMap::new();
+    for module_content in &*raw_module_data::MODULES {
+        let module =
+            CompiledModule::deserialize(module_content).expect("Simple.move must deserialize");
+        modules.insert(module.self_id().name().to_string(), module);
+    }
     (modules, metadata)
 }
 
@@ -106,6 +109,10 @@ pub enum EntryPoints {
     // 0 args
     /// Empty (NoOp) function
     Nop,
+    /// Empty (NoOp) function, signed by 2 accounts
+    Nop2Signers,
+    /// Empty (NoOp) function, signed by 5 accounts
+    Nop5Signers,
     /// Increment signer resource - COUNTER_STEP
     Step,
     /// Fetch signer resource - COUNTER_STEP
@@ -146,6 +153,7 @@ pub enum EntryPoints {
     },
     /// Increment destination resource - COUNTER_STEP
     StepDst,
+
     /// Initialize Token V1 NFT collection
     TokenV1InitializeCollection,
     /// Mint an NFT token. Should be called only after InitializeCollection is called
@@ -158,6 +166,64 @@ pub enum EntryPoints {
 }
 
 impl EntryPoints {
+    pub fn package_name(&self) -> &'static str {
+        match self {
+            EntryPoints::Nop
+            | EntryPoints::Nop2Signers
+            | EntryPoints::Nop5Signers
+            | EntryPoints::Step
+            | EntryPoints::GetCounter
+            | EntryPoints::ResetData
+            | EntryPoints::Double
+            | EntryPoints::Half
+            | EntryPoints::Loopy { .. }
+            | EntryPoints::GetFromConst { .. }
+            | EntryPoints::SetId
+            | EntryPoints::SetName
+            | EntryPoints::Maximize
+            | EntryPoints::Minimize
+            | EntryPoints::MakeOrChange { .. }
+            | EntryPoints::BytesMakeOrChange { .. }
+            | EntryPoints::StepDst => "simple",
+            EntryPoints::TokenV1InitializeCollection
+            | EntryPoints::TokenV1MintAndStoreNFTParallel
+            | EntryPoints::TokenV1MintAndStoreNFTSequential
+            | EntryPoints::TokenV1MintAndTransferNFTParallel
+            | EntryPoints::TokenV1MintAndTransferNFTSequential
+            | EntryPoints::TokenV1MintAndStoreFT
+            | EntryPoints::TokenV1MintAndTransferFT => "simple",
+        }
+    }
+
+    pub fn module_name(&self) -> &'static str {
+        match self {
+            EntryPoints::Nop
+            | EntryPoints::Nop2Signers
+            | EntryPoints::Nop5Signers
+            | EntryPoints::Step
+            | EntryPoints::GetCounter
+            | EntryPoints::ResetData
+            | EntryPoints::Double
+            | EntryPoints::Half
+            | EntryPoints::Loopy { .. }
+            | EntryPoints::GetFromConst { .. }
+            | EntryPoints::SetId
+            | EntryPoints::SetName
+            | EntryPoints::Maximize
+            | EntryPoints::Minimize
+            | EntryPoints::MakeOrChange { .. }
+            | EntryPoints::BytesMakeOrChange { .. }
+            | EntryPoints::StepDst => "simple",
+            EntryPoints::TokenV1InitializeCollection
+            | EntryPoints::TokenV1MintAndStoreNFTParallel
+            | EntryPoints::TokenV1MintAndStoreNFTSequential
+            | EntryPoints::TokenV1MintAndTransferNFTParallel
+            | EntryPoints::TokenV1MintAndTransferNFTSequential
+            | EntryPoints::TokenV1MintAndStoreFT
+            | EntryPoints::TokenV1MintAndTransferFT => "token_v1",
+        }
+    }
+
     pub fn create_payload(
         &self,
         module_id: ModuleId,
@@ -167,6 +233,12 @@ impl EntryPoints {
         match self {
             // 0 args
             EntryPoints::Nop => get_payload_void(module_id, ident_str!("nop").to_owned()),
+            EntryPoints::Nop2Signers => {
+                get_payload_void(module_id, ident_str!("nop_2_signers").to_owned())
+            },
+            EntryPoints::Nop5Signers => {
+                get_payload_void(module_id, ident_str!("nop_5_signers").to_owned())
+            },
             EntryPoints::Step => get_payload_void(module_id, ident_str!("step").to_owned()),
             EntryPoints::GetCounter => {
                 get_payload_void(module_id, ident_str!("get_counter").to_owned())
@@ -250,14 +322,22 @@ impl EntryPoints {
 
     pub fn initialize_entry_point(&self) -> Option<EntryPoints> {
         match self {
-            EntryPoints::TokenV1MintAndStoreFT
-            | EntryPoints::TokenV1MintAndTransferFT
-            | EntryPoints::TokenV1MintAndStoreNFTParallel
+            EntryPoints::TokenV1MintAndStoreNFTParallel
             | EntryPoints::TokenV1MintAndStoreNFTSequential
             | EntryPoints::TokenV1MintAndTransferNFTParallel
-            | EntryPoints::TokenV1MintAndTransferNFTSequential => {
+            | EntryPoints::TokenV1MintAndTransferNFTSequential
+            | EntryPoints::TokenV1MintAndStoreFT
+            | EntryPoints::TokenV1MintAndTransferFT => {
                 Some(EntryPoints::TokenV1InitializeCollection)
             },
+            _ => None,
+        }
+    }
+
+    pub fn multi_sig_additional_num(&self) -> Option<usize> {
+        match self {
+            EntryPoints::Nop2Signers => Some(1),
+            EntryPoints::Nop5Signers => Some(4),
             _ => None,
         }
     }
